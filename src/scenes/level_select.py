@@ -3,45 +3,63 @@ import os
 import sys
 from settings1 import *
 
+
 class LevelSelectionScene:
     def __init__(self, game, selected_car_id):
         self.game = game
         self.selected_car_id = selected_car_id
-        self.font = pygame.font.Font(None, 80)
-        self.small_font = pygame.font.Font(None, 50)
 
-        # Load background placeholder
-        self.bg_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        self.bg_surface.fill((235, 235, 235))  # light gray background
+        self.rebuild_layout()
 
-        # Assets path
-        base_path = os.path.dirname(os.path.dirname(__file__))  # from scenes/ to src/
-        self.assets_path = os.path.join(base_path, "../assets/Levels")
+    # ---------- LAYOUT ----------
 
-        # Create level previews (3 slots)
-        self.levels = []
-        spacing = 200
-        rect_width = 400
-        rect_height = 250
-        start_x = (SCREEN_WIDTH - (3 * rect_width + 2 * spacing)) // 2
-        y = SCREEN_HEIGHT // 2 - rect_height // 2
+    def rebuild_layout(self):
+        w, h = self.game.screen.get_size()
 
+        # Fonts
+        self.title_font = pygame.font.Font(None, max(40, int(h * 0.08)))
+        self.button_font = pygame.font.Font(None, max(24, int(h * 0.045)))
+
+        # Background
+        self.bg = pygame.Surface((w, h))
+        self.bg.fill((240, 240, 240))
+
+        # Back button (top-left)
+        back_w = int(w * 0.12)
+        back_h = int(h * 0.07)
+        self.back_button = pygame.Rect(int(w * 0.04), int(h * 0.05), back_w, back_h)
+
+        # Title position
+        self.title_pos = (w // 2, int(h * 0.12))
+
+        # Level thumbnails row
+        # 3 cards centered horizontally
+        card_w = int(w * 0.26)
+        card_h = int(h * 0.30)
+        gap = int(w * 0.04)
+
+        total_width = card_w * 3 + gap * 2
+        start_x = (w - total_width) // 2
+        y = int(h * 0.40)
+
+        base_path = os.path.dirname(os.path.dirname(__file__))  # scenes -> src
+        levels_path = os.path.join(base_path, "../assets/Levels")
+
+        self.level_cards = []
         for i in range(3):
-            x = start_x + i * (rect_width + spacing)
-            rect = pygame.Rect(x, y, rect_width, rect_height)
-            img_path = os.path.join(self.assets_path, f"level{i+1}_bg.jpg")
+            rect = pygame.Rect(start_x + i * (card_w + gap), y, card_w, card_h)
+            img_path = os.path.join(levels_path, f"level{i+1}_bg.png")
             image = None
             if os.path.exists(img_path):
                 image = pygame.image.load(img_path).convert()
-                image = pygame.transform.scale(image, (rect_width, rect_height))
-            self.levels.append({
+                image = pygame.transform.smoothscale(image, (card_w, card_h))
+            self.level_cards.append({
                 "id": i + 1,
                 "rect": rect,
-                "image": image
+                "image": image,
             })
 
-        # Back button
-        self.back_button = pygame.Rect(50, 50, 200, 70)
+    # ---------- EVENTS ----------
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -49,7 +67,20 @@ class LevelSelectionScene:
                 pygame.quit()
                 sys.exit()
 
-            elif event.type == pygame.MOUSEBUTTONDOWN:
+            # Optional: F11 toggle
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                if hasattr(self.game, "toggle_fullscreen"):
+                    self.game.toggle_fullscreen()
+                    self.rebuild_layout()
+                continue
+
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                # ESC behaves like BACK
+                from scenes.car_select import CarSelectionScene
+                self.game.current_scene = CarSelectionScene(self.game)
+                return
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
                 x, y = event.pos
 
                 # Back button
@@ -58,39 +89,45 @@ class LevelSelectionScene:
                     self.game.current_scene = CarSelectionScene(self.game)
                     return
 
-                # Level click
-                for level in self.levels:
-                    if level["rect"].collidepoint(x, y):
-                        print(f"Selected Level {level['id']}")  # debug
+                # Level cards
+                for card in self.level_cards:
+                    if card["rect"].collidepoint(x, y):
+                        level_id = card["id"]
+                        # For now go to placeholder LevelScene; you can replace later
                         from scenes.level_scene import LevelScene
-                        self.game.current_scene = LevelScene(self.game, level["id"], self.selected_car_id)
+                        self.game.current_scene = LevelScene(
+                            self.game, level_id, self.selected_car_id
+                        )
                         return
 
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                from scenes.car_select import CarSelectionScene
-                self.game.current_scene = CarSelectionScene(self.game)
+    # ---------- DRAW ----------
 
     def draw(self):
-        self.game.screen.blit(self.bg_surface, (0, 0))
-
-        # Title
-        title_surface = self.font.render("SELECT A LEVEL", True, (0, 0, 0))
-        self.game.screen.blit(title_surface, (SCREEN_WIDTH // 2 - title_surface.get_width() // 2, 120))
-
-        # Draw levels
-        for level in self.levels:
-            rect = level["rect"]
-            pygame.draw.rect(self.game.screen, (0, 0, 0), rect, 3)
-            if level["image"]:
-                self.game.screen.blit(level["image"], rect)
-            else:
-                pygame.draw.rect(self.game.screen, (190, 190, 190), rect)
-                txt = self.small_font.render(f"LEVEL {level['id']}", True, (0, 0, 0))
-                self.game.screen.blit(txt, txt.get_rect(center=rect.center))
+        self.game.screen.blit(self.bg, (0, 0))
 
         # Back button
-        pygame.draw.rect(self.game.screen, (200, 200, 200), self.back_button)
-        pygame.draw.rect(self.game.screen, (0, 0, 0), self.back_button, 2)
-        txt = self.small_font.render("BACK", True, (0, 0, 0))
-        txt_rect = txt.get_rect(center=self.back_button.center)
-        self.game.screen.blit(txt, txt_rect)
+        pygame.draw.rect(self.game.screen, (230, 230, 230), self.back_button)
+        pygame.draw.rect(self.game.screen, (0, 0, 0), self.back_button, 3)
+        back_txt = self.button_font.render("BACK", True, (0, 0, 0))
+        back_rect = back_txt.get_rect(center=self.back_button.center)
+        self.game.screen.blit(back_txt, back_rect)
+
+        # Title
+        title_surface = self.title_font.render("SELECT A LEVEL", True, (0, 0, 0))
+        title_rect = title_surface.get_rect(center=self.title_pos)
+        self.game.screen.blit(title_surface, title_rect)
+
+        # Level cards
+        for card in self.level_cards:
+            rect = card["rect"]
+
+            # Border
+            pygame.draw.rect(self.game.screen, (0, 0, 0), rect, 3)
+
+            # Image or placeholder
+            if card["image"]:
+                self.game.screen.blit(card["image"], rect)
+            else:
+                pygame.draw.rect(self.game.screen, (200, 200, 200), rect)
+                txt = self.button_font.render(f"LEVEL {card['id']}", True, (0, 0, 0))
+                self.game.screen.blit(txt, txt.get_rect(center=rect.center))

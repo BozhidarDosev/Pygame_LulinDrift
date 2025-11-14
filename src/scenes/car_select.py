@@ -114,7 +114,7 @@ class CarSelectionScene:
 
     def draw_stats(self):
         w, h = self.game.screen.get_size()
-        start_y = h // 2 + 50
+        start_y = h // 2 + 250
         bar_x = w // 2 - 150
         bar_width = 500
         bar_height = 25

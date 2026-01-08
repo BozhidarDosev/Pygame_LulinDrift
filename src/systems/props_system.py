@@ -1,5 +1,7 @@
+# src/systems/props_system.py
+
 from __future__ import annotations
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 import os
 import random
 import pygame
@@ -10,6 +12,9 @@ def lerp(a: float, b: float, t: float) -> float:
 
 
 class PropsSystem:
+    """
+    Рисува roadside props (bush/rock) по детерминистичен seed.
+    """
     def __init__(
         self,
         level_path: str,
@@ -33,11 +38,9 @@ class PropsSystem:
 
         props_dir = os.path.join(level_path, "props")
         if not os.path.isdir(props_dir):
-            # няма props папка => не рисуваме нищо
             self.enabled = False
             return
 
-        # зареждаме наличните изображения (ако ги има)
         for name in ["bush", "rock1", "rock2"]:
             pth = os.path.join(props_dir, f"{name}.png")
             if os.path.exists(pth):
@@ -57,12 +60,14 @@ class PropsSystem:
             offset_base = rng.uniform(60, 170)
             self.props.append({"kind": kind, "side": side, "offset_base": offset_base, "z": z})
 
+        # far -> near за правилен draw order
         self.props.sort(key=lambda p: p["z"], reverse=True)
 
     def _scaled(self, kind: str, scale: float) -> pygame.Surface:
         key = (kind, int(scale * 100))
         if key in self._cache:
             return self._cache[key]
+
         img = self.prop_images[kind]
         w = max(1, int(img.get_width() * scale))
         h = max(1, int(img.get_height() * scale))
@@ -75,7 +80,6 @@ class PropsSystem:
         screen: pygame.Surface,
         *,
         track_center_fn,
-        road_width_fn,
         top_y: int,
         bottom_y: int,
         gamma: float,
@@ -101,15 +105,15 @@ class PropsSystem:
 
             t = dist_ahead / self.view_depth
             z_screen = 1.0 - t
-            depth = z_screen ** gamma
+            depth = z_screen ** gamma  # 0..1
 
             y = int(top_y + depth * height)
 
-            # ширина на пътя на този depth
             road_w = int(lerp(road_width_far, road_width_near, depth) * screen_w)
             road_half = road_w / 2
 
             cx = track_center_fn(depth)
+
             extra = p["offset_base"] * (0.60 + depth)
             x = int(cx + p["side"] * (road_half + extra))
 

@@ -12,6 +12,7 @@ from track.track import Track, lerp
 from systems.props_system import PropsSystem
 from systems.obstacles_system import ObstaclesSystem
 
+
 def load_crop_alpha(path: str) -> pygame.Surface:
     img = pygame.image.load(path).convert_alpha()
     rect = img.get_bounding_rect()
@@ -31,8 +32,8 @@ class GameScene:
         # -------- PATHS --------
         src_path = os.path.dirname(os.path.dirname(__file__))  # src/
         project_root = os.path.dirname(src_path)
-        assets_path = os.path.join(project_root, "assets")
-        self.level_path = os.path.join(assets_path, "Levels", f"level_{level}")
+        self.assets_path = os.path.join(project_root, "assets")
+        self.level_path = os.path.join(self.assets_path, "Levels", f"level_{level}")
 
         # -------- COLORS --------
         self.sky_color = (20, 90, 140)
@@ -40,6 +41,7 @@ class GameScene:
         self.road_edge_color = (110, 110, 110)
         self.center_line_color = (255, 220, 0)
         self.hud_color = (255, 255, 255)
+
         self.hud_font = pygame.font.Font(None, 36)
 
         # -------- TRACK --------
@@ -87,9 +89,9 @@ class GameScene:
             raise ValueError(f"Invalid car_id: {car_id}")
 
         car_folder = car_data["folder"]
-        back_path = os.path.join(assets_path, "Car images", car_folder, car_data["back"])
-        left_path = os.path.join(assets_path, "Car images", car_folder, car_data["left"])
-        right_path = os.path.join(assets_path, "Car images", car_folder, car_data["right"])
+        back_path = os.path.join(self.assets_path, "Car images", car_folder, car_data["back"])
+        left_path = os.path.join(self.assets_path, "Car images", car_folder, car_data["left"])
+        right_path = os.path.join(self.assets_path, "Car images", car_folder, car_data["right"])
 
         for pth in (back_path, left_path, right_path):
             if not os.path.exists(pth):
@@ -99,8 +101,7 @@ class GameScene:
         self.car_left = pygame.image.load(left_path).convert_alpha()
         self.car_right = pygame.image.load(right_path).convert_alpha()
 
-        # If you already scaled x2, keep it.
-        # If you want to tweak size here, change scale value.
+        # Ако искаш друг размер - пипай scale
         scale = 2.0
         def scale_img(img: pygame.Surface) -> pygame.Surface:
             w, h = img.get_size()
@@ -115,14 +116,14 @@ class GameScene:
         self.player_center_x = self.screen_w // 2
 
         # --- Steering physics (velocity/drift feel) ---
-        self.steer_input = 0       # -1/0/1
-        self.player_vel_x = 0.0    # px/sec
-        self.steer_accel = 2600.0  # px/sec^2
-        self.steer_max_vel = 900.0 # px/sec
-        self.friction = 0.88       # velocity decay when no input (closer to 1 = slides more)
-        self.brake_when_turning = 0.985  # tiny damping each frame while turning
+        self.steer_input = 0
+        self.player_vel_x = 0.0
+        self.steer_accel = 2600.0
+        self.steer_max_vel = 900.0
+        self.friction = 0.88
+        self.brake_when_turning = 0.985
 
-        # -------- ROAD RENDER PARAMS --------
+        # -------- ROAD RENDER --------
         self.road_segments = 220
         self.road_width_near = 0.75
         self.road_width_far = 0.08
@@ -143,7 +144,6 @@ class GameScene:
         self.run_started_ticks = pygame.time.get_ticks()
         self.finish_time_seconds = None
 
-        # hit feedback
         self.hit_timer = 0.0
 
         # -------- PROPS --------
@@ -156,7 +156,7 @@ class GameScene:
             count=22
         )
 
-        # -------- OBSTACLES (ON ROAD) --------
+        # -------- OBSTACLES --------
         self.obstacles = ObstaclesSystem(
             self.level_path,
             enabled=True,
@@ -164,12 +164,159 @@ class GameScene:
             track_length=self.track.length,
             view_depth=800.0,
             count=14,
-            min_gap=360.0,
+            min_gap=450.0,
             lane_width=0.62,
-            collision_window=190.0,
+            collision_window=90.0,
         )
 
-    # -------- CHECKPOINT / RESPAWN --------
+        # -------- FINISH UI --------
+        self._init_finish_ui()
+
+    # ---------------- FINISH UI ----------------
+
+    def _init_finish_ui(self):
+        # try assets/Basic/finish.png first
+        basic_finish = os.path.join(self.assets_path, "Basic","finish","finish_end_text_results.png")
+        level_finish = os.path.join(self.level_path, "finish.png")
+
+        finish_path = basic_finish if os.path.exists(basic_finish) else level_finish
+        self.finish_panel = None
+
+        if os.path.exists(finish_path):
+            self.finish_panel = pygame.image.load(finish_path).convert_alpha()
+
+            # scale to screen nicely (keep aspect)
+            max_w = int(self.screen_w * 0.60)
+            max_h = int(self.screen_h * 0.65)
+            w, h = self.finish_panel.get_size()
+            s = min(max_w / w, max_h / h)
+            self.finish_panel = pygame.transform.smoothscale(self.finish_panel, (int(w * s), int(h * s)))
+
+        # panel rect (even if image missing, we will draw a fallback rectangle)
+        panel_w = self.finish_panel.get_width() if self.finish_panel else int(self.screen_w * 0.55)
+        panel_h = self.finish_panel.get_height() if self.finish_panel else int(self.screen_h * 0.55)
+        self.finish_rect = pygame.Rect(0, 0, panel_w, panel_h)
+        self.finish_rect.center = (self.screen_w // 2, self.screen_h // 2)
+
+        # fonts
+        self.finish_title_font = pygame.font.Font(None, 64)
+        self.finish_text_font = pygame.font.Font(None, 42)
+        self.finish_btn_font = pygame.font.Font(None, 44)
+
+        # buttons inside panel
+        btn_w = int(self.finish_rect.width * 0.60)
+        btn_h = 56
+        gap = 16
+
+        btn_x = self.finish_rect.centerx - btn_w // 2
+        btn_y1 = self.finish_rect.bottom - (btn_h * 2 + gap + 40)
+        btn_y2 = btn_y1 + btn_h + gap
+
+        self.btn_retry = pygame.Rect(btn_x, btn_y1, btn_w, btn_h)
+        self.btn_exit = pygame.Rect(btn_x, btn_y2, btn_w, btn_h)
+
+    def draw_text_box(
+            self,
+            surf: pygame.Surface,
+            text_surf: pygame.Surface,
+            center: tuple[int, int],
+            *,
+            padding_x: int = 18,
+            padding_y: int = 10,
+            bg=(230, 230, 230),
+            border=(0, 0, 0),
+            border_w: int = 3,
+            radius: int = 12,
+    ):
+        rect = text_surf.get_rect(center=center)
+        box = pygame.Rect(
+            rect.left - padding_x,
+            rect.top - padding_y,
+            rect.width + padding_x * 2,
+            rect.height + padding_y * 2,
+        )
+        pygame.draw.rect(surf, bg, box, border_radius=radius)
+        pygame.draw.rect(surf, border, box, border_w, border_radius=radius)
+        surf.blit(text_surf, rect)
+        return box
+
+    def _draw_finish_overlay(self):
+        # darken background
+        overlay = pygame.Surface((self.screen_w, self.screen_h))
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(160)
+        self.game.screen.blit(overlay, (0, 0))
+
+        # panel
+        if self.finish_panel:
+            self.game.screen.blit(self.finish_panel, self.finish_rect.topleft)
+        else:
+            pygame.draw.rect(self.game.screen, (30, 30, 30), self.finish_rect, border_radius=18)
+            pygame.draw.rect(self.game.screen, (220, 220, 220), self.finish_rect, 3, border_radius=18)
+
+        # username + time
+        prof = getattr(self.game, "current_profile", None)
+        username = "Player"
+        if prof and isinstance(prof, dict) and prof.get("username"):
+            username = str(prof["username"])
+
+        time_s = float(self.finish_time_seconds or 0.0)
+
+        title = self.finish_title_font.render("FINISH!", True, (0, 0, 0))
+        name_txt = self.finish_text_font.render(f"Racer: {username}", True, (0, 0, 0))
+        time_txt = self.finish_text_font.render(f"Time: {time_s:.3f}s", True, (0, 0, 0))
+
+        tx = self.finish_rect.centerx
+
+        # --- dynamic layout: always above buttons ---
+        pad_x, pad_y = 18, 10
+        gap = 14
+
+        def box_h(s: pygame.Surface) -> int:
+            return s.get_height() + pad_y * 2
+
+        total_h = box_h(title) + box_h(name_txt) + box_h(time_txt) + gap * 2
+
+        # Keep stack inside panel: clamp between top padding and button area
+        stack_bottom = self.btn_retry.top - 18
+        min_top = self.finish_rect.top + 45
+        start_y = stack_bottom - total_h
+        if start_y < min_top:
+            start_y = min_top
+
+        y1 = int(start_y + box_h(title) * 0.5)
+        y2 = int(y1 + box_h(title) * 0.5 + gap + box_h(name_txt) * 0.5)
+        y3 = int(y2 + box_h(name_txt) * 0.5 + gap + box_h(time_txt) * 0.5)
+
+        self.draw_text_box(
+            self.game.screen, title, (tx, y1),
+            bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y
+        )
+        self.draw_text_box(
+            self.game.screen, name_txt, (tx, y2),
+            bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y
+        )
+        self.draw_text_box(
+            self.game.screen, time_txt, (tx, y3),
+            bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y
+        )
+
+        # buttons (hover)
+        mx, my = pygame.mouse.get_pos()
+
+        def draw_button(rect: pygame.Rect, text: str):
+            hover = rect.collidepoint(mx, my)
+            fill = (240, 240, 240) if hover else (210, 210, 210)
+            border = (0, 0, 0)
+            pygame.draw.rect(self.game.screen, fill, rect, border_radius=12)
+            pygame.draw.rect(self.game.screen, border, rect, 3, border_radius=12)
+            t = self.finish_btn_font.render(text, True, (0, 0, 0))
+            self.game.screen.blit(t, t.get_rect(center=rect.center))
+
+        draw_button(self.btn_retry, "TRY AGAIN")
+        draw_button(self.btn_exit, "EXIT")
+
+    # ---------------- CHECKPOINT / RESPAWN ----------------
 
     def update_checkpoint(self):
         while (self.last_checkpoint_index + 1 < len(self.checkpoints)
@@ -182,15 +329,12 @@ class GameScene:
         else:
             self.distance = 0.0
 
-        # center car near road
         self.player_center_x = self.track.road_center_x(self.screen_w, self.distance, 1.0)
-
-        # speed penalty + reset steering velocity
         self.speed = self.base_speed * 0.6
         self.player_vel_x = 0.0
         self.hit_timer = 0.55
 
-    # -------- INPUT --------
+    # ---------------- INPUT ----------------
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -198,17 +342,36 @@ class GameScene:
                 pygame.quit()
                 sys.exit()
 
+            # Finish screen controls
+            if self.finished:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        self._restart_level()
+                        return
+                    if event.key == pygame.K_ESCAPE:
+                        self._exit_to_menu()
+                        return
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.btn_retry.collidepoint(event.pos):
+                        self._restart_level()
+                        return
+                    if self.btn_exit.collidepoint(event.pos):
+                        self._exit_to_menu()
+                        return
+
+                # When finished, ignore other inputs
+                continue
+
         keys = pygame.key.get_pressed()
 
         if keys[pygame.K_ESCAPE]:
-            from scenes.menu import MenuScene
-            self.game.current_scene = MenuScene(self.game)
+            self._exit_to_menu()
             return
 
         if keys[pygame.K_r]:
             self.respawn_to_checkpoint()
 
-        # steering input (physics uses it in update)
         self.steer_input = 0
         if not self.finished:
             if keys[pygame.K_LEFT]:
@@ -216,45 +379,45 @@ class GameScene:
             elif keys[pygame.K_RIGHT]:
                 self.steer_input = 1
 
-    # -------- UPDATE --------
+    def _restart_level(self):
+        # restart same level/car
+        self.game.current_scene = GameScene(self.game, self.level, self.car_id)
+
+    def _exit_to_menu(self):
+        from scenes.menu import MenuScene
+        self.game.current_scene = MenuScene(self.game)
+
+    # ---------------- UPDATE ----------------
 
     def update(self):
         dt = self.game.clock.get_time() / 1000.0
         if dt <= 0 or self.finished:
             return
 
-        # forward movement
-        # (off-road penalty is applied below -> changes self.speed)
-        # update player steering physics
         if self.steer_input != 0:
             self.player_vel_x += self.steer_input * self.steer_accel * dt
             self.player_vel_x *= self.brake_when_turning
         else:
-            # stronger friction when no input
             self.player_vel_x *= (self.friction ** (dt * 60.0))
 
-        # clamp velocity
         if self.player_vel_x > self.steer_max_vel:
             self.player_vel_x = self.steer_max_vel
         elif self.player_vel_x < -self.steer_max_vel:
             self.player_vel_x = -self.steer_max_vel
 
-        # move player by velocity
         self.player_center_x += self.player_vel_x * dt
 
-        # clamp player within screen bounds
         max_w = max(self.car_back.get_width(), self.car_left.get_width(), self.car_right.get_width())
         half = max_w // 2
         self.player_center_x = max(half, min(self.player_center_x, self.screen_w - half))
 
-        # off-road penalty at near depth
+        # off-road penalty
         p_near = 1.0
         cx_near = self.track.road_center_x(self.screen_w, self.distance, p_near)
         road_w_near = int(lerp(self.road_width_far, self.road_width_near, p_near) * self.screen_w)
 
         left = cx_near - road_w_near // 2
         right = cx_near + road_w_near // 2
-
         on_road = left <= self.player_center_x <= right
 
         if on_road:
@@ -262,10 +425,8 @@ class GameScene:
         else:
             self.speed = lerp(self.speed, self.base_speed * 0.55, 0.15)
 
-        # advance distance
         self.distance += self.speed * dt
 
-        # finish check
         if self.distance >= self.track.length:
             self.distance = self.track.length
             self.finished = True
@@ -273,18 +434,15 @@ class GameScene:
             self.try_save_best_time()
             return
 
-        # ground scroll
         self.ground_scroll -= self.speed * dt * self.ground_parallax
         self.ground_scroll %= self.ground_area_h
 
-        # checkpoints
         self.update_checkpoint()
 
-        # hit timer
         if self.hit_timer > 0:
             self.hit_timer = max(0.0, self.hit_timer - dt)
 
-        # choose drift sprite (based on input + velocity)
+        # sprite choose
         if self.steer_input < 0 or self.player_vel_x < -120:
             self.car_image = self.car_left
         elif self.steer_input > 0 or self.player_vel_x > 120:
@@ -292,10 +450,8 @@ class GameScene:
         else:
             self.car_image = self.car_back
 
-        # compute car rect for collision
         car_rect = self.car_image.get_rect(midbottom=(int(self.player_center_x), self.player_anchor_y))
 
-        # obstacle collision
         hit = self.obstacles.check_hit(
             car_rect=car_rect,
             track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
@@ -310,7 +466,7 @@ class GameScene:
         if hit:
             self.respawn_to_checkpoint()
 
-    # -------- SAVE BEST TIME --------
+    # ---------------- SAVE BEST TIME ----------------
 
     def try_save_best_time(self):
         prof = getattr(self.game, "current_profile", None)
@@ -326,7 +482,7 @@ class GameScene:
             prof["best_times"] = best
             save_profile(prof)
 
-    # -------- DRAW HELPERS --------
+    # ---------------- DRAW HELPERS ----------------
 
     def draw_ground(self):
         clip_rect = pygame.Rect(0, self.ground_area_y, self.screen_w, self.ground_area_h)
@@ -373,9 +529,8 @@ class GameScene:
             pygame.draw.line(self.game.screen, self.road_edge_color, (l0, y0), (l1, y1), edge_thickness)
             pygame.draw.line(self.game.screen, self.road_edge_color, (r0, y0), (r1, y1), edge_thickness)
 
-            # dashed center
-            world0 = (self.distance * 0.06) + (p0 * 60.0)
-            world1 = (self.distance * 0.06) + (p1 * 60.0)
+            world0 = (-self.distance * 0.06) + (p0 * 60.0)
+            world1 = (-self.distance * 0.06) + (p1 * 60.0)
 
             def in_dash(w):
                 return (w % self.dash_cycle) < self.dash_len
@@ -385,9 +540,10 @@ class GameScene:
                 pygame.draw.line(self.game.screen, self.center_line_color, (cx0, y0), (cx1, y1), line_w)
 
     def draw_hud(self):
-        t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
         if self.finished and self.finish_time_seconds is not None:
             t = self.finish_time_seconds
+        else:
+            t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
 
         txt_time = self.hud_font.render(f"TIME: {t:0.3f}s", True, self.hud_color)
         txt_dist = self.hud_font.render(f"DIST: {self.distance:0.0f}/{self.track.length:0.0f}", True, self.hud_color)
@@ -398,15 +554,7 @@ class GameScene:
         self.game.screen.blit(txt_dist, (20, 44))
         self.game.screen.blit(txt_cp, (20, 76))
 
-        if self.hit_timer > 0:
-            hit_txt = self.hud_font.render("HIT! Respawn...", True, (255, 120, 120))
-            self.game.screen.blit(hit_txt, (20, 108))
-
-        if self.finished:
-            done = self.hud_font.render("FINISH! (ESC to menu)", True, (255, 240, 120))
-            self.game.screen.blit(done, (20, 110))
-
-    # -------- DRAW --------
+    # ---------------- DRAW ----------------
 
     def draw(self):
         self.game.screen.fill(self.sky_color)
@@ -415,7 +563,7 @@ class GameScene:
         self.draw_ground()
         self.draw_road()
 
-        # obstacles ON road (draw before roadside props so rocks can sit on asphalt)
+        # obstacles on road
         self.obstacles.draw(
             self.game.screen,
             track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
@@ -447,3 +595,7 @@ class GameScene:
         self.game.screen.blit(self.car_image, car_rect)
 
         self.draw_hud()
+
+        # FINISH overlay on top
+        if self.finished:
+            self._draw_finish_overlay()

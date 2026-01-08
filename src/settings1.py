@@ -1,5 +1,4 @@
-SCREEN_WIDTH = 1920
-SCREEN_HEIGHT = 1080
+
 FPS = 60
 GAME_TITLE = "Lulin Drift"
 SAVE_FILE = "data/savegame.json"
@@ -9,6 +8,7 @@ CAR_ASSETS = {
     1: {
         "folder": "audi_rs4",
         "front": "AUDI_FRONT.png",
+        "back": "AUDI_BACK.png",
         "stats": {"Speed": 90, "Handling": 80, "Acceleration": 85}
     },
     2: {

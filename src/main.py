@@ -9,7 +9,11 @@ class Game:
         pygame.display.set_caption(GAME_TITLE)
 
         # Borderless fullscreen at native resolution
-        self.screen = pygame.display.set_mode((0, 0), pygame.NOFRAME)
+        info = pygame.display.Info()
+        self.screen = pygame.display.set_mode(
+            (info.current_w, info.current_h),
+            pygame.NOFRAME
+        )
 
         self.clock = pygame.time.Clock()
         self.current_scene = MenuScene(self)

@@ -4,5 +4,8 @@
     "unlocked_cars": [
         1
     ],
-    "selected_car": 1
+    "selected_car": 1,
+    "best_times": {
+        "level_1": 9.286
+    }
 }

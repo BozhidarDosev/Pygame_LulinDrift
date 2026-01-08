@@ -94,10 +94,13 @@ class LevelSelectionScene:
                     if card["rect"].collidepoint(x, y):
                         level_id = card["id"]
                         # For now go to placeholder LevelScene; you can replace later
-                        from scenes.level_scene import LevelScene
-                        self.game.current_scene = LevelScene(
-                            self.game, level_id, self.selected_car_id
+                        from scenes.game import GameScene
+                        self.game.current_scene = GameScene(
+                            self.game,
+                            level_id,
+                            self.selected_car_id
                         )
+
                         return
 
     # ---------- DRAW ----------

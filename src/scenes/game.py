@@ -6,7 +6,7 @@ import pygame
 
 from settings1 import CAR_ASSETS
 from utils.profile_manager import save_profile
-
+from systems.ghost_system import GhostSystem
 from track.track_data import LEVELS
 from track.track import Track, lerp
 from systems.props_system import PropsSystem
@@ -32,6 +32,8 @@ class GameScene:
         # -------- PATHS --------
         src_path = os.path.dirname(os.path.dirname(__file__))  # src/
         project_root = os.path.dirname(src_path)
+        self.project_root = project_root
+
         self.assets_path = os.path.join(project_root, "assets")
         self.level_path = os.path.join(self.assets_path, "Levels", f"level_{level}")
         self.finish_path = os.path.join(self.assets_path, "Basic", "finish")
@@ -87,7 +89,6 @@ class GameScene:
         # -------- FINISH LINE (ON ROAD) --------
         finish_line_path = os.path.join(self.finish_path, "finish_line.png")
         self.finish_line_img = None
-
         if os.path.exists(finish_line_path):
             self.finish_line_img = pygame.image.load(finish_line_path).convert_alpha()
 
@@ -113,6 +114,7 @@ class GameScene:
         self.car_right = pygame.image.load(right_path).convert_alpha()
 
         scale = 2.0
+
         def scale_img(img: pygame.Surface) -> pygame.Surface:
             w, h = img.get_size()
             return pygame.transform.smoothscale(img, (int(w * scale), int(h * scale)))
@@ -154,6 +156,11 @@ class GameScene:
         self.run_started_ticks = pygame.time.get_ticks()
         self.finish_time_seconds = None
 
+        # -------- BEST TIME (loaded from profile) --------
+        self.best_time_seconds = None   # best time for this level (float) or None
+        self.is_new_best = False        # set True when you beat best on finish
+        self._load_best_time()
+
         self.hit_timer = 0.0
 
         # -------- PROPS --------
@@ -179,17 +186,38 @@ class GameScene:
             collision_window=90.0,
         )
 
+        # -------- GHOST --------
+        ghost_dir = os.path.join(self.project_root, "data", "ghosts")
+
+        prof = getattr(self.game, "current_profile", None)
+        username = "Player"
+        if prof and isinstance(prof, dict) and prof.get("username"):
+            username = str(prof["username"])
+
+        self.ghost = GhostSystem(
+            base_dir=ghost_dir,
+            username=username,
+            level=self.level,
+            car_back=self.car_back,
+            car_left=self.car_left,
+            car_right=self.car_right,
+            enabled=True,
+            sample_dt=1.0 / 30.0,
+            view_depth=1200.0,
+            alpha=120,
+        )
+        self.ghost.start_run()
+
         # -------- FINISH UI --------
         self._init_finish_ui()
+
+    # ---------------- FINISH LINE ----------------
 
     def draw_finish_line(self):
         if not self.finish_line_img:
             return
 
-        # колко е далеч финала от камерата
         dist_ahead = self.track.length - self.distance
-
-        # ако е зад нас или твърде далече - не го рисувай
         if dist_ahead <= 0 or dist_ahead > self.finish_line_view_depth:
             return
 
@@ -197,7 +225,6 @@ class GameScene:
         bottom = self.road_bottom_y
         height = bottom - top
 
-        # същата перспектива логика като obstacles
         t = dist_ahead / self.finish_line_view_depth
         z_screen = 1.0 - t
         depth = z_screen ** self.gamma  # 0..1
@@ -207,21 +234,19 @@ class GameScene:
         road_w = int(lerp(self.road_width_far, self.road_width_near, depth) * self.screen_w)
         cx = self.track.road_center_x(self.screen_w, self.distance, depth)
 
-        # скалирай спрайта да покрие почти целия път
         target_w = max(2, int(road_w * 0.98))
         iw, ih = self.finish_line_img.get_size()
-        scale = target_w / max(1, iw)
-        target_h = max(2, int(ih * scale))
+        s = target_w / max(1, iw)
+        target_h = max(2, int(ih * s))
 
         spr = pygame.transform.smoothscale(self.finish_line_img, (target_w, target_h))
-
-        # като "лента" върху пътя: midbottom = (cx, y)
         rect = spr.get_rect(midbottom=(cx, y))
         self.game.screen.blit(spr, rect)
 
+    # ---------------- FINISH UI ----------------
+
     def _init_finish_ui(self):
-        # try assets/Basic/finish.png first
-        basic_finish = os.path.join(self.assets_path, "Basic","finish","finish_end_text_results.png")
+        basic_finish = os.path.join(self.assets_path, "Basic", "finish", "finish_end_text_results.png")
         level_finish = os.path.join(self.level_path, "finish.png")
 
         finish_path = basic_finish if os.path.exists(basic_finish) else level_finish
@@ -229,26 +254,22 @@ class GameScene:
 
         if os.path.exists(finish_path):
             self.finish_panel = pygame.image.load(finish_path).convert_alpha()
-
-            # scale to screen nicely (keep aspect)
             max_w = int(self.screen_w * 0.60)
             max_h = int(self.screen_h * 0.65)
             w, h = self.finish_panel.get_size()
             s = min(max_w / w, max_h / h)
             self.finish_panel = pygame.transform.smoothscale(self.finish_panel, (int(w * s), int(h * s)))
 
-        # panel rect (even if image missing, we will draw a fallback rectangle)
         panel_w = self.finish_panel.get_width() if self.finish_panel else int(self.screen_w * 0.55)
         panel_h = self.finish_panel.get_height() if self.finish_panel else int(self.screen_h * 0.55)
         self.finish_rect = pygame.Rect(0, 0, panel_w, panel_h)
         self.finish_rect.center = (self.screen_w // 2, self.screen_h // 2)
 
-        # fonts
         self.finish_title_font = pygame.font.Font(None, 64)
         self.finish_text_font = pygame.font.Font(None, 42)
         self.finish_btn_font = pygame.font.Font(None, 44)
 
-        # buttons inside panel
+        # buttons side-by-side
         btn_h = 52
         pad = 28
         gap = 18
@@ -263,20 +284,18 @@ class GameScene:
         self.btn_retry = pygame.Rect(x1, y, btn_w, btn_h)
         self.btn_exit = pygame.Rect(x2, y, btn_w, btn_h)
 
-
-
     def draw_text_box(
-            self,
-            surf: pygame.Surface,
-            text_surf: pygame.Surface,
-            center: tuple[int, int],
-            *,
-            padding_x: int = 18,
-            padding_y: int = 10,
-            bg=(230, 230, 230),
-            border=(0, 0, 0),
-            border_w: int = 3,
-            radius: int = 12,
+        self,
+        surf: pygame.Surface,
+        text_surf: pygame.Surface,
+        center: tuple[int, int],
+        *,
+        padding_x: int = 18,
+        padding_y: int = 10,
+        bg=(230, 230, 230),
+        border=(0, 0, 0),
+        border_w: int = 3,
+        radius: int = 12,
     ):
         rect = text_surf.get_rect(center=center)
         box = pygame.Rect(
@@ -291,20 +310,17 @@ class GameScene:
         return box
 
     def _draw_finish_overlay(self):
-        # darken background
         overlay = pygame.Surface((self.screen_w, self.screen_h))
         overlay.fill((0, 0, 0))
         overlay.set_alpha(160)
         self.game.screen.blit(overlay, (0, 0))
 
-        # panel
         if self.finish_panel:
             self.game.screen.blit(self.finish_panel, self.finish_rect.topleft)
         else:
             pygame.draw.rect(self.game.screen, (30, 30, 30), self.finish_rect, border_radius=18)
             pygame.draw.rect(self.game.screen, (220, 220, 220), self.finish_rect, 3, border_radius=18)
 
-        # username + time
         prof = getattr(self.game, "current_profile", None)
         username = "Player"
         if prof and isinstance(prof, dict) and prof.get("username"):
@@ -318,7 +334,6 @@ class GameScene:
 
         tx = self.finish_rect.centerx
 
-        # --- dynamic layout: always above buttons ---
         pad_x, pad_y = 18, 10
         gap = 14
 
@@ -327,7 +342,6 @@ class GameScene:
 
         total_h = box_h(title) + box_h(name_txt) + box_h(time_txt) + gap * 2
 
-        # Keep stack inside panel: clamp between top padding and button area
         stack_bottom = self.btn_retry.top - 18
         min_top = self.finish_rect.top + 45
         start_y = stack_bottom - total_h
@@ -338,28 +352,17 @@ class GameScene:
         y2 = int(y1 + box_h(title) * 0.5 + gap + box_h(name_txt) * 0.5)
         y3 = int(y2 + box_h(name_txt) * 0.5 + gap + box_h(time_txt) * 0.5)
 
-        self.draw_text_box(
-            self.game.screen, title, (tx, y1),
-            bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y
-        )
-        self.draw_text_box(
-            self.game.screen, name_txt, (tx, y2),
-            bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y
-        )
-        self.draw_text_box(
-            self.game.screen, time_txt, (tx, y3),
-            bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y
-        )
+        self.draw_text_box(self.game.screen, title, (tx, y1), bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y)
+        self.draw_text_box(self.game.screen, name_txt, (tx, y2), bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y)
+        self.draw_text_box(self.game.screen, time_txt, (tx, y3), bg=(240, 240, 240), padding_x=pad_x, padding_y=pad_y)
 
-        # buttons (hover)
         mx, my = pygame.mouse.get_pos()
 
         def draw_button(rect: pygame.Rect, text: str):
             hover = rect.collidepoint(mx, my)
             fill = (240, 240, 240) if hover else (210, 210, 210)
-            border = (0, 0, 0)
             pygame.draw.rect(self.game.screen, fill, rect, border_radius=12)
-            pygame.draw.rect(self.game.screen, border, rect, 3, border_radius=12)
+            pygame.draw.rect(self.game.screen, (0, 0, 0), rect, 3, border_radius=12)
             t = self.finish_btn_font.render(text, True, (0, 0, 0))
             self.game.screen.blit(t, t.get_rect(center=rect.center))
 
@@ -392,7 +395,6 @@ class GameScene:
                 pygame.quit()
                 sys.exit()
 
-            # Finish screen controls
             if self.finished:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
@@ -409,8 +411,6 @@ class GameScene:
                     if self.btn_exit.collidepoint(event.pos):
                         self._exit_to_menu()
                         return
-
-                # When finished, ignore other inputs
                 continue
 
         keys = pygame.key.get_pressed()
@@ -423,14 +423,12 @@ class GameScene:
             self.respawn_to_checkpoint()
 
         self.steer_input = 0
-        if not self.finished:
-            if keys[pygame.K_LEFT]:
-                self.steer_input = -1
-            elif keys[pygame.K_RIGHT]:
-                self.steer_input = 1
+        if keys[pygame.K_LEFT]:
+            self.steer_input = -1
+        elif keys[pygame.K_RIGHT]:
+            self.steer_input = 1
 
     def _restart_level(self):
-        # restart same level/car
         self.game.current_scene = GameScene(self.game, self.level, self.car_id)
 
     def _exit_to_menu(self):
@@ -461,7 +459,7 @@ class GameScene:
         half = max_w // 2
         self.player_center_x = max(half, min(self.player_center_x, self.screen_w - half))
 
-        # off-road penalty
+        # off-road penalty (near)
         p_near = 1.0
         cx_near = self.track.road_center_x(self.screen_w, self.distance, p_near)
         road_w_near = int(lerp(self.road_width_far, self.road_width_near, p_near) * self.screen_w)
@@ -469,6 +467,25 @@ class GameScene:
         left = cx_near - road_w_near // 2
         right = cx_near + road_w_near // 2
         on_road = left <= self.player_center_x <= right
+
+        # --- ghost recording ---
+        run_t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
+
+        road_half_near = max(1.0, road_w_near * 0.5)
+        lane = (float(self.player_center_x) - float(cx_near)) / road_half_near
+        if lane < -1.0:
+            lane = -1.0
+        elif lane > 1.0:
+            lane = 1.0
+
+        if self.steer_input < 0 or self.player_vel_x < -120:
+            gdir = -1
+        elif self.steer_input > 0 or self.player_vel_x > 120:
+            gdir = 1
+        else:
+            gdir = 0
+
+        self.ghost.record(dt=dt, t=run_t, distance=self.distance, lane=lane, dir=gdir)
 
         if on_road:
             self.speed = lerp(self.speed, self.base_speed, 0.08)
@@ -481,7 +498,11 @@ class GameScene:
             self.distance = self.track.length
             self.finished = True
             self.finish_time_seconds = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
-            self.try_save_best_time()
+
+            new_best = self.try_save_best_time()
+            if new_best:
+                self.ghost.save_recording_as_best(self.finish_time_seconds)
+
             return
 
         self.ground_scroll -= self.speed * dt * self.ground_parallax
@@ -492,7 +513,6 @@ class GameScene:
         if self.hit_timer > 0:
             self.hit_timer = max(0.0, self.hit_timer - dt)
 
-        # sprite choose
         if self.steer_input < 0 or self.player_vel_x < -120:
             self.car_image = self.car_left
         elif self.steer_input > 0 or self.player_vel_x > 120:
@@ -516,21 +536,49 @@ class GameScene:
         if hit:
             self.respawn_to_checkpoint()
 
-    # ---------------- SAVE BEST TIME ----------------
+    # ---------------- SAVE BEST TIME (IMPORTANT FIX) ----------------
 
-    def try_save_best_time(self):
+    def try_save_best_time(self) -> bool:
+        """
+        Updates profile best time.
+        Returns True if NEW BEST was set, else False.
+        Also updates:
+          - self.is_new_best
+          - self.best_time_seconds
+        """
         prof = getattr(self.game, "current_profile", None)
         if not prof or "username" not in prof:
+            self.is_new_best = False
+            return False
+
+        level_key = f"level_{self.level}"
+        best_dict = prof.get("best_times", {})
+        prev = best_dict.get(level_key)
+
+        prev_f = float(prev) if prev is not None else None
+        finish = float(self.finish_time_seconds or 0.0)
+
+        if prev_f is None or finish < prev_f:
+            self.is_new_best = True
+            self.best_time_seconds = finish
+            best_dict[level_key] = round(finish, 3)
+            prof["best_times"] = best_dict
+            save_profile(prof)
+            return True
+
+        self.is_new_best = False
+        self.best_time_seconds = prev_f
+        return False
+
+    def _load_best_time(self):
+        prof = getattr(self.game, "current_profile", None)
+        if not prof or "username" not in prof:
+            self.best_time_seconds = None
             return
 
         level_key = f"level_{self.level}"
-        best = prof.get("best_times", {})
-        prev = best.get(level_key)
-
-        if prev is None or self.finish_time_seconds < float(prev):
-            best[level_key] = round(self.finish_time_seconds, 3)
-            prof["best_times"] = best
-            save_profile(prof)
+        prev = prof.get("best_times", {}).get(level_key)
+        self.best_time_seconds = float(prev) if prev is not None else None
 
     # ---------------- DRAW HELPERS ----------------
 
@@ -591,18 +639,34 @@ class GameScene:
 
     def draw_hud(self):
         if self.finished and self.finish_time_seconds is not None:
-            t = self.finish_time_seconds
+            t = float(self.finish_time_seconds)
         else:
             t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
 
         txt_time = self.hud_font.render(f"TIME: {t:0.3f}s", True, self.hud_color)
-        txt_dist = self.hud_font.render(f"DIST: {self.distance:0.0f}/{self.track.length:0.0f}", True, self.hud_color)
+        self.game.screen.blit(txt_time, (20, 12))
+
+        if self.finished and self.is_new_best:
+            best_line = f"NEW BEST TIME: {t:0.3f}s"
+        else:
+            if self.best_time_seconds is None:
+                best_line = "BEST: --"
+            else:
+                best_line = f"BEST: {self.best_time_seconds:0.3f}s"
+
+        txt_best = self.hud_font.render(best_line, True, self.hud_color)
+        self.game.screen.blit(txt_best, (20, 44))
+
+        txt_dist = self.hud_font.render(
+            f"DIST: {self.distance:0.0f}/{self.track.length:0.0f}",
+            True,
+            self.hud_color
+        )
         cp = self.checkpoints[self.last_checkpoint_index] if self.last_checkpoint_index >= 0 else 0
         txt_cp = self.hud_font.render(f"CHECKPOINT: {cp:0.0f}", True, self.hud_color)
 
-        self.game.screen.blit(txt_time, (20, 12))
-        self.game.screen.blit(txt_dist, (20, 44))
-        self.game.screen.blit(txt_cp, (20, 76))
+        self.game.screen.blit(txt_dist, (20, 76))
+        self.game.screen.blit(txt_cp, (20, 108))
 
     # ---------------- DRAW ----------------
 
@@ -612,10 +676,24 @@ class GameScene:
 
         self.draw_ground()
         self.draw_road()
-
         self.draw_finish_line()
 
-        # obstacles on road
+        # ghost draw (before obstacles)
+        run_t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
+        self.ghost.draw(
+            self.game.screen,
+            t=run_t,
+            player_distance=self.distance,
+            track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
+            top_y=self.road_top_y,
+            bottom_y=self.road_bottom_y,
+            gamma=self.gamma,
+            screen_w=self.screen_w,
+            screen_h=self.screen_h,
+            road_width_far=self.road_width_far,
+            road_width_near=self.road_width_near,
+        )
+
         self.obstacles.draw(
             self.game.screen,
             track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
@@ -629,7 +707,6 @@ class GameScene:
             road_width_near=self.road_width_near,
         )
 
-        # roadside props
         self.props.draw(
             self.game.screen,
             track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
@@ -648,6 +725,5 @@ class GameScene:
 
         self.draw_hud()
 
-        # FINISH overlay on top
         if self.finished:
             self._draw_finish_overlay()

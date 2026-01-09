@@ -34,6 +34,7 @@ class GameScene:
         project_root = os.path.dirname(src_path)
         self.assets_path = os.path.join(project_root, "assets")
         self.level_path = os.path.join(self.assets_path, "Levels", f"level_{level}")
+        self.finish_path = os.path.join(self.assets_path, "Basic", "finish")
 
         # -------- COLORS --------
         self.sky_color = (20, 90, 140)
@@ -83,6 +84,16 @@ class GameScene:
         self.ground_scroll = 0.0
         self.ground_parallax = 0.35
 
+        # -------- FINISH LINE (ON ROAD) --------
+        finish_line_path = os.path.join(self.finish_path, "finish_line.png")
+        self.finish_line_img = None
+
+        if os.path.exists(finish_line_path):
+            self.finish_line_img = pygame.image.load(finish_line_path).convert_alpha()
+
+        # колко преди финала да започне да се вижда
+        self.finish_line_view_depth = 1200.0  # tweak: 800..1600
+
         # -------- PLAYER (BACK/LEFT/RIGHT) --------
         car_data = CAR_ASSETS.get(car_id)
         if not car_data:
@@ -101,7 +112,6 @@ class GameScene:
         self.car_left = pygame.image.load(left_path).convert_alpha()
         self.car_right = pygame.image.load(right_path).convert_alpha()
 
-        # Ако искаш друг размер - пипай scale
         scale = 2.0
         def scale_img(img: pygame.Surface) -> pygame.Surface:
             w, h = img.get_size()
@@ -172,7 +182,42 @@ class GameScene:
         # -------- FINISH UI --------
         self._init_finish_ui()
 
-    # ---------------- FINISH UI ----------------
+    def draw_finish_line(self):
+        if not self.finish_line_img:
+            return
+
+        # колко е далеч финала от камерата
+        dist_ahead = self.track.length - self.distance
+
+        # ако е зад нас или твърде далече - не го рисувай
+        if dist_ahead <= 0 or dist_ahead > self.finish_line_view_depth:
+            return
+
+        top = self.road_top_y
+        bottom = self.road_bottom_y
+        height = bottom - top
+
+        # същата перспектива логика като obstacles
+        t = dist_ahead / self.finish_line_view_depth
+        z_screen = 1.0 - t
+        depth = z_screen ** self.gamma  # 0..1
+
+        y = int(top + depth * height)
+
+        road_w = int(lerp(self.road_width_far, self.road_width_near, depth) * self.screen_w)
+        cx = self.track.road_center_x(self.screen_w, self.distance, depth)
+
+        # скалирай спрайта да покрие почти целия път
+        target_w = max(2, int(road_w * 0.98))
+        iw, ih = self.finish_line_img.get_size()
+        scale = target_w / max(1, iw)
+        target_h = max(2, int(ih * scale))
+
+        spr = pygame.transform.smoothscale(self.finish_line_img, (target_w, target_h))
+
+        # като "лента" върху пътя: midbottom = (cx, y)
+        rect = spr.get_rect(midbottom=(cx, y))
+        self.game.screen.blit(spr, rect)
 
     def _init_finish_ui(self):
         # try assets/Basic/finish.png first
@@ -204,16 +249,21 @@ class GameScene:
         self.finish_btn_font = pygame.font.Font(None, 44)
 
         # buttons inside panel
-        btn_w = int(self.finish_rect.width * 0.60)
-        btn_h = 56
-        gap = 16
+        btn_h = 52
+        pad = 28
+        gap = 18
 
-        btn_x = self.finish_rect.centerx - btn_w // 2
-        btn_y1 = self.finish_rect.bottom - (btn_h * 2 + gap + 40)
-        btn_y2 = btn_y1 + btn_h + gap
+        total_w = self.finish_rect.width - pad * 2
+        btn_w = int((total_w - gap) / 2)
 
-        self.btn_retry = pygame.Rect(btn_x, btn_y1, btn_w, btn_h)
-        self.btn_exit = pygame.Rect(btn_x, btn_y2, btn_w, btn_h)
+        y = self.finish_rect.bottom - pad - btn_h
+        x1 = self.finish_rect.left + pad
+        x2 = x1 + btn_w + gap
+
+        self.btn_retry = pygame.Rect(x1, y, btn_w, btn_h)
+        self.btn_exit = pygame.Rect(x2, y, btn_w, btn_h)
+
+
 
     def draw_text_box(
             self,
@@ -562,6 +612,8 @@ class GameScene:
 
         self.draw_ground()
         self.draw_road()
+
+        self.draw_finish_line()
 
         # obstacles on road
         self.obstacles.draw(

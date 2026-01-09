@@ -21,7 +21,7 @@ def smoothstep(t: float) -> float:
 @dataclass
 class TrackSegment:
     length: float
-    curve: float  # отрицателно = ляво, положително = дясно
+    curve: float
 
 
 class Track:

@@ -26,7 +26,10 @@ class ObstaclesSystem:
         min_gap: float = 260.0,
         lane_width: float = 0.62,   # how much of the road width obstacles can use (0..1)
         collision_window: float = 90.0,
+        names: Optional[List[str]] = None,
     ):
+
+
         self.enabled = enabled
         self.track_length = float(track_length)
         self.view_depth = float(view_depth)
@@ -44,6 +47,11 @@ class ObstaclesSystem:
         obstacles_dir = os.path.join(level_path, "obstacles")
         props_dir = os.path.join(level_path, "props")
 
+        search_dirs = [obstacles_dir, props_dir]
+
+        default_names = ["rock1", "rock2", "bush"]
+        load_names = names if names else default_names
+
         candidates = [
             ("rock1", os.path.join(obstacles_dir, "rock1.png")),
             ("rock2", os.path.join(obstacles_dir, "rock2.png")),
@@ -52,12 +60,14 @@ class ObstaclesSystem:
             ("rock2", os.path.join(props_dir, "rock2.png")),
         ]
 
-        for name, path in candidates:
-            if name not in self.images and os.path.exists(path):
-                self.images[name] = pygame.image.load(path).convert_alpha()
+        for name in load_names:
+            for d in search_dirs:
+                path = os.path.join(d, f"{name}.png")
+                if os.path.exists(path) and name not in self.images:
+                    self.images[name] = pygame.image.load(path).convert_alpha()
+                    break
 
         if not self.images:
-            # No images -> disable cleanly
             self.enabled = False
             return
 
@@ -89,6 +99,8 @@ class ObstaclesSystem:
                 "z": z,
                 "lane_offset": lane_offset,
             })
+
+        self.obstacles.sort(key=lambda o: o["z"], reverse=True)
 
     def _scaled(self, kind: str, scale: float) -> pygame.Surface:
         key = (kind, int(scale * 100))

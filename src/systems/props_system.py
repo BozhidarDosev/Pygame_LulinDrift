@@ -1,11 +1,9 @@
-# src/systems/props_system.py
 
 from __future__ import annotations
-from typing import Dict, List, Tuple
 import os
 import random
 import pygame
-
+from typing import Dict, List, Tuple, Optional
 
 def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
@@ -24,6 +22,8 @@ class PropsSystem:
         view_depth: float = 650.0,
         world_length: float = 3000.0,
         count: int = 22,
+        names: Optional[List[str]] = None,
+        weights: Optional[Dict[str, float]] = None,
     ):
         self.enabled = enabled
         self.view_depth = float(view_depth)
@@ -41,7 +41,10 @@ class PropsSystem:
             self.enabled = False
             return
 
-        for name in ["bush", "rock1", "rock2"]:
+        default_names = ["bush", "rock1", "rock2"]
+        load_names = names if names else default_names
+
+        for name in load_names:
             pth = os.path.join(props_dir, f"{name}.png")
             if os.path.exists(pth):
                 self.prop_images[name] = pygame.image.load(pth).convert_alpha()
@@ -53,12 +56,15 @@ class PropsSystem:
         rng = random.Random(seed)
         kinds = list(self.prop_images.keys())
 
+        w_map = weights or {}
+        w_list = [float(w_map.get(k, 1.0)) for k in kinds]
+
         for _ in range(count):
             z = rng.uniform(150.0, max(200.0, self.world_length - 50.0))
-            kind = rng.choice(kinds)
+            kind = rng.choices(kinds, weights=w_list, k=1)[0]
             side = rng.choice([-1, 1])
-            offset_base = rng.uniform(60, 170)
-            self.props.append({"kind": kind, "side": side, "offset_base": offset_base, "z": z})
+            spread = rng.random()
+            self.props.append({"kind": kind, "side": side, "spread": spread, "z": z})
 
         # far -> near за правилен draw order
         self.props.sort(key=lambda p: p["z"], reverse=True)
@@ -76,18 +82,18 @@ class PropsSystem:
         return surf
 
     def draw(
-        self,
-        screen: pygame.Surface,
-        *,
-        track_center_fn,
-        top_y: int,
-        bottom_y: int,
-        gamma: float,
-        distance: float,
-        screen_w: int,
-        screen_h: int,
-        road_width_far: float,
-        road_width_near: float,
+            self,
+            screen: pygame.Surface,
+            *,
+            track_center_fn,
+            top_y: int,
+            bottom_y: int,
+            gamma: float,
+            distance: float,
+            screen_w: int,
+            screen_h: int,
+            road_width_far: float,
+            road_width_near: float,
     ):
         if not self.enabled:
             return
@@ -105,21 +111,30 @@ class PropsSystem:
 
             t = dist_ahead / self.view_depth
             z_screen = 1.0 - t
-            depth = z_screen ** gamma  # 0..1
+            depth = z_screen ** gamma
 
             y = int(top_y + depth * height)
 
             road_w = int(lerp(road_width_far, road_width_near, depth) * screen_w)
             road_half = road_w / 2
-
             cx = track_center_fn(depth)
 
-            extra = p["offset_base"] * (0.60 + depth)
+            # -------- NEW: spread по целия бекграунд --------
+            margin = 12
+            max_extra = (screen_w * 0.5) - road_half - margin  # до ръба на екрана
+            if max_extra <= 5:
+                continue
+
+            min_extra = 10  # колко минимум “извън пътя”
+            extra = lerp(min_extra, max_extra, p.get("spread", 0.0))
+
+            # (по желание) леко да “събира” в далечината:
+            extra *= (0.35 + 0.65 * depth)
+
             x = int(cx + p["side"] * (road_half + extra))
 
             scale = lerp(0.10, 1.05, depth)
             spr = self._scaled(p["kind"], scale)
-
             rect = spr.get_rect(midbottom=(x, y))
             screen.blit(spr, rect)
 

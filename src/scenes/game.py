@@ -164,26 +164,57 @@ class GameScene:
         self.hit_timer = 0.0
 
         # -------- PROPS --------
+        props_names = None
+        props_weights = None
+        props_count = 22
+        props_view_depth = 650.0
+
+        if level == 2:
+            props_names = ["tree1", "rock2"]
+            props_weights = {"tree1": 6.0, "rock2": 1.0}
+            props_count = 70
+            props_view_depth = 1100.0
+
+        elif level == 3:
+            props_names = ["penguin1", "penguin2", "penguin3"]
+            props_weights = {"penguin1": 1.0, "penguin2": 1.0, "penguin3": 1.0}
+            props_count = 85
+            props_view_depth = 1100.0
+
         self.props = PropsSystem(
             self.level_path,
             enabled=True,
             seed=1337 + level,
-            view_depth=650.0,
+            view_depth=props_view_depth,
             world_length=self.track.length,
-            count=22
+            count=props_count,
+            names=props_names,
+            weights=props_weights,
         )
 
         # -------- OBSTACLES --------
+        obstacle_names = None
+        ob_count = 14
+        ob_gap = 450.0
+
+        if level == 2:
+            obstacle_names = ["log1", "log2"]
+        elif level == 3:
+            obstacle_names = ["puddle"]
+            ob_count = 24  # <-- повече puddles
+            ob_gap = 320.0  # <-- по-малка дистанция между тях
+
         self.obstacles = ObstaclesSystem(
             self.level_path,
             enabled=True,
             seed=9001 + level,
             track_length=self.track.length,
             view_depth=800.0,
-            count=14,
-            min_gap=450.0,
+            count=ob_count,  # <-- вече е променливо
+            min_gap=ob_gap,  # <-- вече е променливо
             lane_width=0.62,
             collision_window=90.0,
+            names=obstacle_names,
         )
 
         # -------- GHOST --------
@@ -694,7 +725,7 @@ class GameScene:
             road_width_near=self.road_width_near,
         )
 
-        self.obstacles.draw(
+        self.props.draw(
             self.game.screen,
             track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
             top_y=self.road_top_y,
@@ -707,7 +738,7 @@ class GameScene:
             road_width_near=self.road_width_near,
         )
 
-        self.props.draw(
+        self.obstacles.draw(
             self.game.screen,
             track_center_fn=lambda p: self.track.road_center_x(self.screen_w, self.distance, p),
             top_y=self.road_top_y,

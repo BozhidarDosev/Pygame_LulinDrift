@@ -1,6 +1,9 @@
 import pygame
 import sys
 import os
+import shutil
+
+from utils.profile_manager import save_profile
 from settings1 import *
 from utils.profile_manager import create_profile, load_profile
 from scenes.car_select import CarSelectionScene
@@ -13,6 +16,8 @@ class MenuScene:
         self.input_text = ""
         self.message = ""
         self.input_mode = None
+        self.settings_open = False
+        self.confirm_reset_open = False
 
     def rebuild_layout(self):
         base_path = os.path.dirname(os.path.dirname(__file__))
@@ -53,6 +58,54 @@ class MenuScene:
 
         self.title_pos = (w // 2, int(h * 0.18))
 
+        # ---- SETTINGS OVERLAY LAYOUT ----
+        panel_w = int(w * 0.62)
+        panel_h = int(h * 0.42)
+        self.settings_rect = pygame.Rect(0, 0, panel_w, panel_h)
+        self.settings_rect.center = (w // 2, h // 2)
+
+        btn_w = int(panel_w * 0.62)
+        btn_h = 58
+        btn_x = self.settings_rect.centerx - btn_w // 2
+        btn_y = self.settings_rect.centery - btn_h // 2
+        self.btn_reset_progress = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+
+        # confirm dialog
+        cw = int(panel_w * 0.85)
+        ch = 170
+        self.confirm_rect = pygame.Rect(0, 0, cw, ch)
+        self.confirm_rect.center = self.settings_rect.center
+
+        yes_w = int(cw * 0.38)
+        yes_h = 48
+        gap = 16
+        y_btn = self.confirm_rect.bottom - 25 - yes_h
+        x_yes = self.confirm_rect.centerx - gap // 2 - yes_w
+        x_no = self.confirm_rect.centerx + gap // 2
+        self.btn_confirm_yes = pygame.Rect(x_yes, y_btn, yes_w, yes_h)
+        self.btn_confirm_no = pygame.Rect(x_no, y_btn, yes_w, yes_h)
+
+    def _reset_progress(self):
+        prof = getattr(self.game, "current_profile", None)
+        if not prof or not prof.get("username"):
+            self.message = "Load a profile first!"
+            return
+
+        # 1) Clear best times
+        prof["best_times"] = {}
+        save_profile(prof)
+
+        # 2) Delete ghost folder for this user
+        username = str(prof["username"])
+        base_path = os.path.dirname(os.path.dirname(__file__))  # src/
+        project_root = os.path.dirname(base_path)
+        ghost_user_dir = os.path.join(project_root, "data", "ghosts", username)
+
+        if os.path.isdir(ghost_user_dir):
+            shutil.rmtree(ghost_user_dir, ignore_errors=True)
+
+        self.message = "Progress reset successfully!"
+
     # ----------- EVENT HANDLING -------------
     def handle_events(self):
         for event in pygame.event.get():
@@ -60,10 +113,35 @@ class MenuScene:
                 pygame.quit()
                 sys.exit()
 
+            # ако settings overlay е отворен
+            if self.settings_open:
+                self.handle_settings_events(event)
+                continue
+
             if self.input_active:
                 self.handle_input_events(event)
             else:
                 self.handle_menu_clicks(event)
+
+    def handle_settings_events(self, event):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.settings_open = False
+            self.confirm_reset_open = False
+            return
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.confirm_reset_open:
+                if self.btn_confirm_yes.collidepoint(event.pos):
+                    self._reset_progress()
+                    self.confirm_reset_open = False
+                    return
+                if self.btn_confirm_no.collidepoint(event.pos):
+                    self.confirm_reset_open = False
+                    return
+            else:
+                if self.btn_reset_progress.collidepoint(event.pos):
+                    self.confirm_reset_open = True
+                    return
 
     def handle_menu_clicks(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -81,7 +159,8 @@ class MenuScene:
                     elif label == "LOAD GAME":
                         self.open_input("load")
                     elif label == "SETTINGS":
-                        print("SETTINGS clicked — add settings scene later")
+                        self.settings_open = True
+                        self.confirm_reset_open = False
                     elif label == "QUIT":
                         pygame.quit()
                         sys.exit()
@@ -164,6 +243,62 @@ class MenuScene:
             msg = font.render(self.message, True, (200, 0, 0))
             self.game.screen.blit(msg, (w // 2 - msg.get_width() // 2, box.bottom - 40))
 
+    def draw_settings_overlay(self):
+        w, h = self.game.screen.get_size()
+
+        overlay = pygame.Surface((w, h))
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(180)
+        self.game.screen.blit(overlay, (0, 0))
+
+        pygame.draw.rect(self.game.screen, (245, 245, 245), self.settings_rect, border_radius=18)
+        pygame.draw.rect(self.game.screen, (0, 0, 0), self.settings_rect, 3, border_radius=18)
+
+        font_title = pygame.font.Font(None, 72)
+        font_text = pygame.font.Font(None, 42)
+
+        title = font_title.render("SETTINGS", True, (0, 0, 0))
+        self.game.screen.blit(title, title.get_rect(center=(self.settings_rect.centerx, self.settings_rect.top + 55)))
+
+        mx, my = pygame.mouse.get_pos()
+        hover = self.btn_reset_progress.collidepoint(mx, my)
+        fill = (255, 255, 255) if hover else (225, 225, 225)
+
+        pygame.draw.rect(self.game.screen, fill, self.btn_reset_progress, border_radius=12)
+        pygame.draw.rect(self.game.screen, (0, 0, 0), self.btn_reset_progress, 3, border_radius=12)
+
+        txt = font_text.render("RESET PROGRESS", True, (0, 0, 0))
+        self.game.screen.blit(txt, txt.get_rect(center=self.btn_reset_progress.center))
+
+        hint = pygame.font.Font(None, 34).render("ESC to close", True, (0, 0, 0))
+        self.game.screen.blit(hint, hint.get_rect(center=(self.settings_rect.centerx, self.settings_rect.bottom - 40)))
+
+        # confirm dialog
+        if self.confirm_reset_open:
+            pygame.draw.rect(self.game.screen, (250, 250, 250), self.confirm_rect, border_radius=16)
+            pygame.draw.rect(self.game.screen, (0, 0, 0), self.confirm_rect, 3, border_radius=16)
+
+            msg1 = font_text.render("Reset records & ghosts?", True, (0, 0, 0))
+            msg2 = pygame.font.Font(None, 34).render("This cannot be undone.", True, (0, 0, 0))
+            self.game.screen.blit(msg1, msg1.get_rect(center=(self.confirm_rect.centerx, self.confirm_rect.top + 45)))
+            self.game.screen.blit(msg2, msg2.get_rect(center=(self.confirm_rect.centerx, self.confirm_rect.top + 80)))
+
+            # YES
+            hy = self.btn_confirm_yes.collidepoint(mx, my)
+            fy = (255, 255, 255) if hy else (225, 225, 225)
+            pygame.draw.rect(self.game.screen, fy, self.btn_confirm_yes, border_radius=10)
+            pygame.draw.rect(self.game.screen, (0, 0, 0), self.btn_confirm_yes, 3, border_radius=10)
+            t_yes = font_text.render("YES", True, (0, 0, 0))
+            self.game.screen.blit(t_yes, t_yes.get_rect(center=self.btn_confirm_yes.center))
+
+            # CANCEL
+            hn = self.btn_confirm_no.collidepoint(mx, my)
+            fn = (255, 255, 255) if hn else (225, 225, 225)
+            pygame.draw.rect(self.game.screen, fn, self.btn_confirm_no, border_radius=10)
+            pygame.draw.rect(self.game.screen, (0, 0, 0), self.btn_confirm_no, 3, border_radius=10)
+            t_no = font_text.render("CANCEL", True, (0, 0, 0))
+            self.game.screen.blit(t_no, t_no.get_rect(center=self.btn_confirm_no.center))
+
     # ------------------ DRAW ------------------
     def draw(self):
         self.game.screen.blit(self.bg, (0, 0))
@@ -181,3 +316,7 @@ class MenuScene:
         # input popup
         if self.input_active:
             self.draw_input_box()
+
+        if self.settings_open:
+            self.draw_settings_overlay()
+

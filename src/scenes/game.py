@@ -1,8 +1,7 @@
-# src/scenes/game.py
-
 import sys
 import os
 import pygame
+import math
 
 from settings1 import CAR_ASSETS
 from utils.profile_manager import save_profile
@@ -141,6 +140,14 @@ class GameScene:
         self.road_width_far = 0.08
         self.gamma = 2.0
 
+        # -------- SETTINGS (PAUSE + VOLUME) - init volume BEFORE audio --------
+        self.settings_open = False
+        self.master_volume = 0.85
+        self.dragging_volume = False
+
+        # -------- AUDIO --------
+        self._init_audio()
+
         self.dash_cycle = 8.0
         self.dash_len = 3.2
 
@@ -155,6 +162,10 @@ class GameScene:
         self.finished = False
         self.run_started_ticks = pygame.time.get_ticks()
         self.finish_time_seconds = None
+
+        # -------- PAUSE TIME ACCUMULATION --------
+        self.pause_accum_ms = 0
+        self.pause_started_ms = None
 
         # -------- BEST TIME (loaded from profile) --------
         self.best_time_seconds = None   # best time for this level (float) or None
@@ -210,8 +221,8 @@ class GameScene:
             seed=9001 + level,
             track_length=self.track.length,
             view_depth=800.0,
-            count=ob_count,  # <-- вече е променливо
-            min_gap=ob_gap,  # <-- вече е променливо
+            count=ob_count,
+            min_gap=ob_gap,
             lane_width=0.62,
             collision_window=90.0,
             names=obstacle_names,
@@ -241,6 +252,199 @@ class GameScene:
 
         # -------- FINISH UI --------
         self._init_finish_ui()
+
+        self.settings_title_font = pygame.font.Font(None, 64)
+        self.settings_text_font = pygame.font.Font(None, 36)
+
+        # panel + slider rects
+        panel_w = int(self.screen_w * 0.62)
+        panel_h = int(self.screen_h * 0.42)
+        self.settings_rect = pygame.Rect(0, 0, panel_w, panel_h)
+        self.settings_rect.center = (self.screen_w // 2, self.screen_h // 2)
+
+        slider_w = int(panel_w * 0.70)
+        slider_h = 10
+        slider_x = self.settings_rect.centerx - slider_w // 2
+        slider_y = self.settings_rect.centery + 30
+        self.volume_bar = pygame.Rect(slider_x, slider_y, slider_w, slider_h)
+
+        self.knob_radius = 14
+
+        # apply volume immediately
+        self._apply_master_volume()
+
+        btn_w = int(panel_w * 0.55)
+        btn_h = 52
+        btn_x = self.settings_rect.centerx - btn_w // 2
+        btn_y = self.settings_rect.bottom - 85
+        self.btn_main_menu = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+
+    def _clamp(self, x: float, a: float = 0.0, b: float = 1.0) -> float:
+        return max(a, min(b, x))
+
+    def _run_time_seconds(self) -> float:
+        now = pygame.time.get_ticks()
+
+        paused_ms = self.pause_accum_ms
+
+        if self.settings_open and self.pause_started_ms is not None:
+            paused_ms += (now - self.pause_started_ms)
+
+        return (now - self.run_started_ticks - paused_ms) / 1000.0
+
+    def _apply_master_volume(self):
+        if not getattr(self, "audio_enabled", False):
+            return
+
+        # FX channel uses master directly
+        if hasattr(self, "ch_fx"):
+            self.ch_fx.set_volume(self.master_volume)
+
+        # accel is dynamic -> multiply by master
+        if hasattr(self, "ch_accel"):
+            base = getattr(self, "accel_volume", 0.0)
+            self.ch_accel.set_volume(base * self.master_volume)
+
+    def _toggle_settings(self):
+        self.settings_open = not self.settings_open
+        self.dragging_volume = False
+
+        now = pygame.time.get_ticks()
+
+        # --- pause timer bookkeeping ---
+        if self.settings_open:
+            self.pause_started_ms = now
+        else:
+            if self.pause_started_ms is not None:
+                self.pause_accum_ms += (now - self.pause_started_ms)
+                self.pause_started_ms = None
+
+        # --- pause/unpause audio ---
+        if getattr(self, "audio_enabled", False):
+            if self.settings_open:
+                self.ch_accel.pause()
+                self.ch_fx.pause()
+            else:
+                self.ch_accel.unpause()
+                self.ch_fx.unpause()
+                self._apply_master_volume()
+
+    def _set_volume_from_mouse(self, mx: int):
+        t = (mx - self.volume_bar.left) / max(1, self.volume_bar.width)
+        self.master_volume = self._clamp(t, 0.0, 1.0)
+        self._apply_master_volume()
+
+    def _draw_settings_overlay(self):
+        # dark overlay
+        overlay = pygame.Surface((self.screen_w, self.screen_h))
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(170)
+        self.game.screen.blit(overlay, (0, 0))
+
+        # panel
+        pygame.draw.rect(self.game.screen, (235, 235, 235), self.settings_rect, border_radius=18)
+        pygame.draw.rect(self.game.screen, (0, 0, 0), self.settings_rect, 3, border_radius=18)
+
+        title = self.settings_title_font.render("SETTINGS", True, (0, 0, 0))
+        self.game.screen.blit(title, title.get_rect(center=(self.settings_rect.centerx, self.settings_rect.top + 55)))
+
+        label = self.settings_text_font.render("Volume", True, (0, 0, 0))
+        self.game.screen.blit(label, (self.volume_bar.left, self.volume_bar.top - 35))
+
+        # bar background
+        pygame.draw.rect(self.game.screen, (80, 80, 80), self.volume_bar, border_radius=8)
+
+        # fill
+        fill_w = int(self.volume_bar.width * self.master_volume)
+        fill_rect = pygame.Rect(self.volume_bar.left, self.volume_bar.top, fill_w, self.volume_bar.height)
+        pygame.draw.rect(self.game.screen, (20, 140, 220), fill_rect, border_radius=8)
+
+        # knob
+        knob_x = self.volume_bar.left + fill_w
+        knob_y = self.volume_bar.centery
+        pygame.draw.circle(self.game.screen, (255, 255, 255), (knob_x, knob_y), self.knob_radius)
+        pygame.draw.circle(self.game.screen, (0, 0, 0), (knob_x, knob_y), self.knob_radius, 2)
+
+        hint = self.settings_text_font.render("ESC to resume", True, (0, 0, 0))
+        self.game.screen.blit(hint, hint.get_rect(center=(self.settings_rect.centerx, self.settings_rect.bottom - 45)))
+
+
+        #main menu button
+        mx, my = pygame.mouse.get_pos()
+        hover = self.btn_main_menu.collidepoint(mx, my)
+        fill = (245, 245, 245) if hover else (220, 220, 220)
+
+        pygame.draw.rect(self.game.screen, fill, self.btn_main_menu, border_radius=12)
+        pygame.draw.rect(self.game.screen, (0, 0, 0), self.btn_main_menu, 3, border_radius=12)
+
+        txt = self.settings_text_font.render("MAIN MENU", True, (0, 0, 0))
+        self.game.screen.blit(txt, txt.get_rect(center=self.btn_main_menu.center))
+
+    # ---------------- AUDIO ----------------
+
+    def _init_audio(self):
+        # init mixer ако не е init-нат (ако вече го правиш в main, няма да пречи)
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+        except Exception as e:
+            print("Audio disabled:", e)
+            self.audio_enabled = False
+            return
+
+        self.audio_enabled = True
+
+        sounds_dir = os.path.join(self.project_root, "assets", "Sounds")
+        accel_path = os.path.join(sounds_dir, "car_acceleration_sound_fx.wav")
+        skid_path = os.path.join(sounds_dir, "car_skidding_sound_fx.wav")
+        victory_path = os.path.join(sounds_dir, "gaming-victory.mp3")
+
+        try:
+            self.snd_accel = pygame.mixer.Sound(accel_path)
+            self.snd_skid = pygame.mixer.Sound(skid_path)
+            self.snd_victory = pygame.mixer.Sound(victory_path)
+        except Exception as e:
+            print("Failed to load sounds:", e)
+            self.audio_enabled = False
+            return
+
+        # отделни канали (за да не се прекъсват)
+        self.ch_accel = pygame.mixer.Channel(0)
+        self.ch_fx = pygame.mixer.Channel(1)
+
+        self.accel_volume = 1.0
+        self._restart_accel_sound()
+
+    def _restart_accel_sound(self):
+        if not getattr(self, "audio_enabled", False):
+            return
+        # рестарт от начало (loop)
+        self.ch_accel.stop()
+        self.accel_volume = 0.0  # ще се вдигне плавно в update
+        self.ch_accel.play(self.snd_accel, loops=-1)
+        self.ch_accel.set_volume(self.accel_volume * self.master_volume)
+
+    def _play_skid(self):
+        if not getattr(self, "audio_enabled", False):
+            return
+        self.ch_fx.set_volume(self.master_volume)
+        self.ch_fx.play(self.snd_skid)
+
+    def _play_victory(self):
+        if not getattr(self, "audio_enabled", False):
+            return
+        self.ch_fx.set_volume(self.master_volume)
+        self.ch_fx.play(self.snd_victory)
+
+    # ---------------- Stop audio from playing ----------------
+
+    def _stop_all_audio(self):
+        if not getattr(self, "audio_enabled", False):
+            return
+        if hasattr(self, "ch_accel"):
+            self.ch_accel.stop()
+        if hasattr(self, "ch_fx"):
+            self.ch_fx.stop()
 
     # ---------------- FINISH LINE ----------------
 
@@ -413,6 +617,7 @@ class GameScene:
         else:
             self.distance = 0.0
 
+        self._restart_accel_sound()
         self.player_center_x = self.track.road_center_x(self.screen_w, self.distance, 1.0)
         self.speed = self.base_speed * 0.6
         self.player_vel_x = 0.0
@@ -444,11 +649,32 @@ class GameScene:
                         return
                 continue
 
-        keys = pygame.key.get_pressed()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self._toggle_settings()
+                return
 
-        if keys[pygame.K_ESCAPE]:
-            self._exit_to_menu()
+            if self.settings_open:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # MAIN MENU button
+                    if self.btn_main_menu.collidepoint(event.pos):
+                        self._abort_to_menu()
+                        return
+                    # click on bar sets volume + start drag
+                    if self.volume_bar.collidepoint(event.pos):
+                        self.dragging_volume = True
+                        self._set_volume_from_mouse(event.pos[0])
+
+                elif event.type == pygame.MOUSEMOTION and self.dragging_volume:
+                    self._set_volume_from_mouse(event.pos[0])
+
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    self.dragging_volume = False
+
+                continue
+
+        if self.settings_open:
             return
+        keys = pygame.key.get_pressed()
 
         if keys[pygame.K_r]:
             self.respawn_to_checkpoint()
@@ -462,6 +688,27 @@ class GameScene:
     def _restart_level(self):
         self.game.current_scene = GameScene(self.game, self.level, self.car_id)
 
+    def _abort_to_menu(self):
+        # спри всичко аудио
+        self._stop_all_audio()
+
+        # safety: никакви “finish” флагове/време
+        self.finished = False
+        self.finish_time_seconds = None
+        self.is_new_best = False
+
+        # ако някъде пазиш "continue scene" в game, чистим го безопасно
+        for attr in (
+                "resume_scene", "saved_scene", "last_scene", "continue_scene",
+                "paused_scene", "game_scene", "last_game_scene"
+        ):
+            if hasattr(self.game, attr):
+                setattr(self.game, attr, None)
+
+        # към главното меню
+        from scenes.menu import MenuScene
+        self.game.current_scene = MenuScene(self.game)
+
     def _exit_to_menu(self):
         from scenes.menu import MenuScene
         self.game.current_scene = MenuScene(self.game)
@@ -470,7 +717,7 @@ class GameScene:
 
     def update(self):
         dt = self.game.clock.get_time() / 1000.0
-        if dt <= 0 or self.finished:
+        if dt <= 0 or self.finished or self.settings_open:
             return
 
         if self.steer_input != 0:
@@ -500,7 +747,7 @@ class GameScene:
         on_road = left <= self.player_center_x <= right
 
         # --- ghost recording ---
-        run_t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
+        run_t = self._run_time_seconds()
 
         road_half_near = max(1.0, road_w_near * 0.5)
         lane = (float(self.player_center_x) - float(cx_near)) / road_half_near
@@ -523,12 +770,32 @@ class GameScene:
         else:
             self.speed = lerp(self.speed, self.base_speed * 0.55, 0.15)
 
+        # -------- AUDIO: accel volume based on speed + on/off road --------
+        if getattr(self, "audio_enabled", False):
+            # 0..1 според текущата скорост
+            sp = 0.0 if self.base_speed <= 0 else max(0.0, min(1.0, self.speed / self.base_speed))
+
+            # ако е off-road -> по-тихо
+            road_mul = 1.0 if on_road else 0.35
+
+            target_vol = sp * road_mul  # примерно: on-road ~1.0, off-road ~0.2
+
+            # плавно приближаване (без "рязане")
+            k = 6.0  # колко бързо да реагира
+            a = min(1.0, k * dt)
+            self.accel_volume += (target_vol - self.accel_volume) * a
+
+            self.ch_accel.set_volume(self.accel_volume * self.master_volume)
+
         self.distance += self.speed * dt
 
         if self.distance >= self.track.length:
             self.distance = self.track.length
             self.finished = True
-            self.finish_time_seconds = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
+            self.finish_time_seconds = self._run_time_seconds()
+
+            self._stop_all_audio()
+            self._play_victory()
 
             new_best = self.try_save_best_time()
             if new_best:
@@ -565,6 +832,8 @@ class GameScene:
             road_width_near=self.road_width_near,
         )
         if hit:
+            # self.respawn_to_checkpoint()
+            self._play_skid()
             self.respawn_to_checkpoint()
 
     # ---------------- SAVE BEST TIME (IMPORTANT FIX) ----------------
@@ -672,7 +941,8 @@ class GameScene:
         if self.finished and self.finish_time_seconds is not None:
             t = float(self.finish_time_seconds)
         else:
-            t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
+            t = self._run_time_seconds()
+
 
         txt_time = self.hud_font.render(f"TIME: {t:0.3f}s", True, self.hud_color)
         self.game.screen.blit(txt_time, (20, 12))
@@ -710,7 +980,8 @@ class GameScene:
         self.draw_finish_line()
 
         # ghost draw (before obstacles)
-        run_t = (pygame.time.get_ticks() - self.run_started_ticks) / 1000.0
+        run_t = self._run_time_seconds()
+
         self.ghost.draw(
             self.game.screen,
             t=run_t,
@@ -758,3 +1029,7 @@ class GameScene:
 
         if self.finished:
             self._draw_finish_overlay()
+
+        if self.settings_open:
+            self._draw_settings_overlay()
+

@@ -10,11 +10,9 @@ class Game:
 
 
         # Borderless fullscreen at native resolution
-        info = pygame.display.Info()
-        self.screen = pygame.display.set_mode(
-            (info.current_w, info.current_h),
-            pygame.NOFRAME
-        )
+        BASE_W, BASE_H = 1920,1080
+        flags = pygame.SCALED | pygame.FULLSCREEN
+        self.screen = pygame.display.set_mode((BASE_W, BASE_H), flags)
 
         self.clock = pygame.time.Clock()
         self.current_scene = MenuScene(self)

@@ -119,7 +119,7 @@ class PropsSystem:
             road_half = road_w / 2
             cx = track_center_fn(depth)
 
-            # -------- NEW: spread по целия бекграунд --------
+            # -------- spread по целия бекграунд --------
             margin = 12
             max_extra = (screen_w * 0.5) - road_half - margin  # до ръба на екрана
             if max_extra <= 5:
@@ -128,7 +128,7 @@ class PropsSystem:
             min_extra = 10  # колко минимум “извън пътя”
             extra = lerp(min_extra, max_extra, p.get("spread", 0.0))
 
-            # (по желание) леко да “събира” в далечината:
+            #далечината:
             extra *= (0.35 + 0.65 * depth)
 
             x = int(cx + p["side"] * (road_half + extra))

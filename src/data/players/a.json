@@ -6,6 +6,7 @@
     ],
     "selected_car": 1,
     "best_times": {
-        "level_1": 27.998
+        "level_1": 27.998,
+        "level_2": 27.99
     }
 }

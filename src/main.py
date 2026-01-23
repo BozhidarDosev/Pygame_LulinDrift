@@ -8,6 +8,7 @@ class Game:
     def __init__(self):
         pygame.display.set_caption(GAME_TITLE)
 
+
         # Borderless fullscreen at native resolution
         info = pygame.display.Info()
         self.screen = pygame.display.set_mode(
@@ -21,7 +22,6 @@ class Game:
 
     def toggle_fullscreen(self):
         """Toggle between windowed 2560x1440 and borderless fullscreen."""
-        # optional later, not strictly needed now
         pass
 
     def run(self):

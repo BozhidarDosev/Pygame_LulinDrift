@@ -140,7 +140,7 @@ class GameScene:
         self.road_width_far = 0.08
         self.gamma = 2.0
 
-        # -------- SETTINGS (PAUSE + VOLUME) - init volume BEFORE audio --------
+        # -------- SETTINGS (PAUSE + VOLUME) --------
         self.settings_open = False
         self.master_volume = 0.85
         self.dragging_volume = False
@@ -168,8 +168,8 @@ class GameScene:
         self.pause_started_ms = None
 
         # -------- BEST TIME (loaded from profile) --------
-        self.best_time_seconds = None   # best time for this level (float) or None
-        self.is_new_best = False        # set True when you beat best on finish
+        self.best_time_seconds = None
+        self.is_new_best = False
         self._load_best_time()
 
         self.hit_timer = 0.0
@@ -778,10 +778,10 @@ class GameScene:
             # ако е off-road -> по-тихо
             road_mul = 1.0 if on_road else 0.35
 
-            target_vol = sp * road_mul  # примерно: on-road ~1.0, off-road ~0.2
+            target_vol = sp * road_mul
 
-            # плавно приближаване (без "рязане")
-            k = 6.0  # колко бързо да реагира
+            # плавно приближаване
+            k = 6.0
             a = min(1.0, k * dt)
             self.accel_volume += (target_vol - self.accel_volume) * a
 
